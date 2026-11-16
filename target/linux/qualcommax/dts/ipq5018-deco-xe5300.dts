@@ -1,0 +1,455 @@
+// SPDX-License-Identifier: GPL-2.0-or-later OR MIT
+/*
+ * TP-Link Deco XE5300 (hardware 2.0)
+ *
+ * IPQ5018 with its 2.4 GHz radio, two QCN6122 radios (5 and 6 GHz), an
+ * RTL8367S-VB switch behind a 2.5 Gb/s fixed link, 512 MiB RAM and 128 MiB
+ * QPIC serial NAND.
+ *
+ * The stock bootloader selects a firmware slot by name from the tp_boot_idx
+ * variable (0: "rootfs", 1: "rootfs_1") and passes ubi.mtd=<slot>
+ * root=mtd:ubi_rootfs. OpenWrt keeps its kernel FIT in UBI volume "kernel"
+ * and its root file system in volume "rootfs", so the root device is
+ * overridden below.
+ */
+
+/dts-v1/;
+
+/* As in the stock device tree. */
+/memreserve/ 0x4a3ee000 0x10000;
+
+#include "ipq5018.dtsi"
+#include "ipq5018-ess.dtsi"
+#include "ipq5018-qcn6122.dtsi"
+
+#include <dt-bindings/gpio/gpio.h>
+#include <dt-bindings/input/input.h>
+
+/ {
+	model = "TP-Link Deco XE5300";
+	compatible = "tplink,deco-xe5300", "qcom,ipq5018";
+
+	aliases {
+		serial0 = &blsp1_uart1;
+		led-boot = &led_status_blue;
+		led-failsafe = &led_status_red;
+		led-running = &led_status_green;
+		led-upgrade = &led_status_blue;
+	};
+
+	chosen {
+		stdout-path = "serial0:115200n8";
+		/*
+		 * The bootloader hardcodes root=mtd:ubi_rootfs; override it.
+		 * The Q6 needs clocks that no driver claims: without
+		 * clk_ignore_unused its start times out.
+		 */
+		bootargs-append = " root=/dev/ubiblock0_1 coherent_pool=2M clk_ignore_unused";
+	};
+
+	memory@40000000 {
+		device_type = "memory";
+		reg = <0x0 0x40000000 0x0 0x20000000>;
+	};
+
+	reserved-memory {
+		/* As in the stock device tree. */
+		nss@40000000 {
+			reg = <0x0 0x40000000 0x0 0x1000000>;
+			no-map;
+		};
+	};
+
+	keys {
+		compatible = "gpio-keys";
+		pinctrl-0 = <&button_pins>;
+		pinctrl-names = "default";
+
+		button-reset {
+			label = "reset";
+			gpios = <&tlmm 12 GPIO_ACTIVE_LOW>;
+			linux,code = <KEY_RESTART>;
+			debounce-interval = <60>;
+		};
+	};
+
+	leds {
+		compatible = "gpio-leds";
+		pinctrl-0 = <&led_pins>;
+		pinctrl-names = "default";
+
+		/* One status light with three colours; GPIOs from the stock device tree. */
+		led_status_blue: led-status-blue {
+			label = "blue:status";
+			gpios = <&tlmm 13 GPIO_ACTIVE_LOW>;
+			default-state = "off";
+		};
+
+		led_status_red: led-status-red {
+			label = "red:status";
+			gpios = <&tlmm 22 GPIO_ACTIVE_LOW>;
+			default-state = "off";
+		};
+
+		led_status_green: led-status-green {
+			label = "green:status";
+			gpios = <&tlmm 38 GPIO_ACTIVE_LOW>;
+			default-state = "off";
+		};
+	};
+};
+
+&tz_region {
+	/* 4 MiB, as in the stock device tree. */
+	reg = <0x0 0x4ac00000 0x0 0x400000>;
+};
+
+&sleep_clk {
+	clock-frequency = <32000>;
+};
+
+&xo_board_clk {
+	clock-div = <4>;
+	clock-mult = <1>;
+};
+
+&blsp1_uart1 {
+	pinctrl-0 = <&serial_0_pins>;
+	pinctrl-names = "default";
+	status = "okay";
+};
+
+&prng {
+	status = "okay";
+};
+
+&qfprom {
+	status = "okay";
+};
+
+&watchdog {
+	status = "okay";
+};
+
+&qpic_bam {
+	status = "okay";
+};
+
+&qpic_nand {
+	pinctrl-0 = <&qpic_pins>;
+	pinctrl-names = "default";
+	status = "okay";
+
+	nand@0 {
+		compatible = "spi-nand";
+		reg = <0>;
+
+		nand-ecc-engine = <&qpic_nand>;
+		nand-ecc-strength = <4>;
+		nand-ecc-step-size = <512>;
+		nand-bus-width = <8>;
+
+		/*
+		 * Offsets read from stock. Only the two firmware slots and the
+		 * bootloader environment (for tp_boot_idx) are writable.
+		 */
+		partitions {
+			compatible = "fixed-partitions";
+			#address-cells = <1>;
+			#size-cells = <1>;
+
+			partition@0 {
+				label = "0:SBL1";
+				reg = <0x0 0x80000>;
+				read-only;
+			};
+
+			partition@80000 {
+				label = "0:MIBIB";
+				reg = <0x80000 0x80000>;
+				read-only;
+			};
+
+			partition@100000 {
+				label = "0:BOOTCONFIG";
+				reg = <0x100000 0x40000>;
+				read-only;
+			};
+
+			partition@140000 {
+				label = "0:BOOTCONFIG1";
+				reg = <0x140000 0x40000>;
+				read-only;
+			};
+
+			partition@180000 {
+				label = "0:QSEE";
+				reg = <0x180000 0x100000>;
+				read-only;
+			};
+
+			partition@280000 {
+				label = "0:DEVCFG";
+				reg = <0x280000 0x40000>;
+				read-only;
+			};
+
+			partition@2c0000 {
+				label = "0:CDT";
+				reg = <0x2c0000 0x40000>;
+				read-only;
+			};
+
+			partition@300000 {
+				label = "0:APPSBLENV";
+				reg = <0x300000 0x80000>;
+			};
+
+			partition@380000 {
+				label = "0:APPSBL";
+				reg = <0x380000 0x140000>;
+				read-only;
+			};
+
+			partition@4c0000 {
+				label = "0:ART";
+				reg = <0x4c0000 0x100000>;
+				read-only;
+			};
+
+			partition@5c0000 {
+				label = "0:TRAINING";
+				reg = <0x5c0000 0x80000>;
+				read-only;
+			};
+
+			partition@640000 {
+				label = "rootfs";
+				reg = <0x640000 0x2a00000>;
+			};
+
+			partition@3040000 {
+				label = "rootfs_1";
+				reg = <0x3040000 0x2a00000>;
+			};
+
+			partition@5a40000 {
+				label = "0:ETHPHYFW";
+				reg = <0x5a40000 0x80000>;
+				read-only;
+			};
+
+			partition@5ac0000 {
+				label = "factory_data";
+				reg = <0x5ac0000 0x900000>;
+				read-only;
+			};
+
+			partition@63c0000 {
+				label = "runtime_data";
+				reg = <0x63c0000 0x1100000>;
+				read-only;
+			};
+		};
+	};
+};
+
+/* mdio0 carries the shared MDIO clock and reset. */
+&mdio0 {
+	status = "okay";
+};
+
+&uniphy0 {
+	status = "okay";
+};
+
+&gmac1 {
+	status = "okay";
+	phy-mode = "2500base-x";
+
+	fixed-link {
+		speed = <2500>;
+		full-duplex;
+	};
+};
+
+&mdio1 {
+	status = "okay";
+	pinctrl-0 = <&mdio1_pins>;
+	pinctrl-names = "default";
+
+	switch@1d {
+		compatible = "realtek,rtl8365mb";
+		reg = <0x1d>;
+		reset-gpios = <&tlmm 39 GPIO_ACTIVE_LOW>;
+
+		mdio {
+			compatible = "realtek,smi-mdio";
+			#address-cells = <1>;
+			#size-cells = <0>;
+
+			switchphy0: ethernet-phy@0 {
+				reg = <0>;
+			};
+
+			switchphy1: ethernet-phy@1 {
+				reg = <1>;
+			};
+
+			switchphy2: ethernet-phy@2 {
+				reg = <2>;
+			};
+		};
+
+		ports {
+			#address-cells = <1>;
+			#size-cells = <0>;
+
+			/* Which physical socket is which has not been mapped yet. */
+			port@0 {
+				reg = <0>;
+				label = "lan1";
+				phy-handle = <&switchphy0>;
+			};
+
+			port@1 {
+				reg = <1>;
+				label = "lan2";
+				phy-handle = <&switchphy1>;
+			};
+
+			port@2 {
+				reg = <2>;
+				label = "lan3";
+				phy-handle = <&switchphy2>;
+			};
+
+			port@6 {
+				reg = <6>;
+				label = "cpu";
+				ethernet = <&gmac1>;
+				phy-mode = "2500base-x";
+
+				fixed-link {
+					speed = <2500>;
+					full-duplex;
+				};
+			};
+		};
+	};
+};
+
+/*
+ * Q6 memory map (region size and per-radio board-data, calibration and dump
+ * addresses) as in the stock device tree. It is required: this board's board
+ * files are in the WLAN.HK.2.5 format and only a 2.5 firmware accepts them,
+ * and the public WLAN.HK.2.5.0.1 build asserts in platform_map.c with the
+ * smaller map the other dual-QCN6122 boards (Zyxel SCR50AXE, Linksys MX6200)
+ * use.
+ */
+&q6_region {
+	reg = <0x0 0x4b000000 0x0 0x05400000>;
+};
+
+&q6v5_wcss {
+	status = "okay";
+};
+
+/* IPQ5018, 2.4 GHz */
+&wifi {
+	status = "okay";
+
+	qcom,rproc = <&q6_wcss_pd1>;
+	qcom,calibration-variant = "TP-Link-Deco-XE5300-2G";
+	qcom,ath11k-fw-memory-mode = <1>;
+	qcom,bdf-addr = <0x4c400000>;
+	qcom,caldb-addr = <0x4d400000>;
+	qcom,m3-dump-addr = <0x4d200000>;
+};
+
+/* QCN6122, 6 GHz */
+&wifi1 {
+	status = "okay";
+
+	qcom,rproc = <&q6_wcss_pd2>;
+	qcom,userpd-subsys-name = "q6v5_wcss_userpd2";
+	qcom,calibration-variant = "TP-Link-Deco-XE5300-6G";
+	qcom,ath11k-fw-memory-mode = <1>;
+	qcom,bdf-addr = <0x4d600000>;
+	qcom,caldb-addr = <0x4e800000>;
+	qcom,m3-dump-addr = <0x4e600000>;
+};
+
+/* QCN6122, 5 GHz */
+&wifi2 {
+	status = "okay";
+
+	qcom,rproc = <&q6_wcss_pd3>;
+	qcom,userpd-subsys-name = "q6v5_wcss_userpd3";
+	qcom,calibration-variant = "TP-Link-Deco-XE5300-5G";
+	qcom,ath11k-fw-memory-mode = <1>;
+	qcom,bdf-addr = <0x4ed00000>;
+	qcom,caldb-addr = <0x4ff00000>;
+	qcom,m3-dump-addr = <0x4fd00000>;
+};
+
+&tlmm {
+	serial_0_pins: uart0-state {
+		pins = "gpio20", "gpio21";
+		function = "blsp0_uart0";
+		bias-disable;
+	};
+
+	button_pins: button-state {
+		pins = "gpio12";
+		function = "gpio";
+		drive-strength = <8>;
+		bias-pull-up;
+	};
+
+	led_pins: led-state {
+		pins = "gpio13", "gpio22", "gpio38";
+		function = "gpio";
+		drive-strength = <2>;
+		bias-disable;
+	};
+
+	qpic_pins: qpic-state {
+		clock-pins {
+			pins = "gpio9";
+			function = "qspi_clk";
+			drive-strength = <8>;
+			bias-disable;
+		};
+
+		cs-pins {
+			pins = "gpio8";
+			function = "qspi_cs";
+			drive-strength = <8>;
+			bias-disable;
+		};
+
+		data-pins {
+			pins = "gpio4", "gpio5", "gpio6", "gpio7";
+			function = "qspi_data";
+			drive-strength = <8>;
+			bias-disable;
+		};
+	};
+
+	mdio1_pins: mdio1-state {
+		mdc-pins {
+			pins = "gpio36";
+			function = "mdc";
+			drive-strength = <8>;
+			bias-pull-up;
+		};
+
+		mdio-pins {
+			pins = "gpio37";
+			function = "mdio";
+			drive-strength = <8>;
+			bias-pull-up;
+		};
+	};
+};

@@ -7,6 +7,9 @@ ipq50xx_setup_interfaces()
 {
 	local board="$1"
 	case $board in
+	tplink,deco-xe5300)
+		ucidef_set_interface_lan "lan1 lan2 lan3"
+		;;
 	elecom,wrc-x3000gs2|\
 	elecom,wrc-x3000gst2|\
 	iodata,wn-dax3000gr|\
@@ -86,6 +89,16 @@ ipq50xx_setup_macs()
 		ucidef_set_label_macaddr "$label_mac"
 		# gmac1 has no nvmem MAC source, so stmmac would randomise the
 		# DSA conduit's address on every boot - pin it to the label MAC
+		ucidef_set_network_device_mac "eth0" "$label_mac"
+		;;
+	tplink,deco-xe5300)
+		# factory MAC is 6 raw bytes in factory_data/default-mac, mounted
+		# read-only during preinit (see lib/preinit/09_mount_factory_data)
+		label_mac=$(get_mac_binary /tmp/factory_data/default-mac 0)
+		[ -n "$label_mac" ] || return
+		ucidef_set_interface_macaddr "lan" "$label_mac"
+		ucidef_set_label_macaddr "$label_mac"
+		# the DSA conduit has no nvmem MAC source; pin it to the label MAC
 		ucidef_set_network_device_mac "eth0" "$label_mac"
 		;;
 	tplink,eap650-outdoor-v1|\

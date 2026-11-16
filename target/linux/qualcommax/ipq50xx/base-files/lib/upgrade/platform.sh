@@ -286,6 +286,46 @@ platform_do_upgrade() {
 		fi
 		nand_do_upgrade_success
 		;;
+	tplink,deco-xe5300)
+		# Two firmware slots, selected by name through tp_boot_idx
+		# (0: "rootfs", 1: "rootfs_1"). Unlike a plain A/B scheme, the
+		# other slot is left alone so that it can keep stock firmware:
+		# - running from flash: rewrite the slot OpenWrt booted from
+		#   (the bootloader names it in ubi.mtd=);
+		# - running from initramfs (first install): write the slot the
+		#   bootloader is NOT set to boot, then point tp_boot_idx at it.
+		local tp slot newtp
+
+		case " $(cat /proc/cmdline) " in
+			*" ubi.mtd=rootfs_1 "*) slot="rootfs_1" ;;
+			*" ubi.mtd=rootfs "*) slot="rootfs" ;;
+		esac
+		if [ -z "$slot" ]; then
+			tp=$(fw_printenv -n tp_boot_idx 2>/dev/null)
+			case "$tp" in
+				1) slot="rootfs";   newtp=0 ;;
+				0) slot="rootfs_1"; newtp=1 ;;
+				*)
+					echo "cannot read tp_boot_idx; refusing to guess a slot"
+					nand_do_upgrade_failed
+					;;
+			esac
+		fi
+
+		CI_UBIPART="$slot"
+		remove_oem_ubi_volume ubi_rootfs
+		remove_oem_ubi_volume wifi_fw
+		remove_oem_ubi_volume bt_fw
+		sync
+		nand_do_flash_file "$1" || nand_do_upgrade_failed
+		if [ -n "$newtp" ]; then
+			fw_setenv tp_boot_idx "$newtp" || {
+				echo "failed to set tp_boot_idx"
+				nand_do_upgrade_failed
+			}
+		fi
+		nand_do_upgrade_success
+		;;
 	tplink,archer-ax55-v1|\
 	tplink,eap650-outdoor-v1|\
 	tplink,re700x)
