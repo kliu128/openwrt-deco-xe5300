@@ -39,7 +39,11 @@ Observed on hardware:
 - All three radios as access points (2.4 GHz HE20, 5 GHz HE80 on channel 36,
   6 GHz HE80), WPA2/WPA3, 802.11r.
 - 802.11s mesh backhaul on 6 GHz across three nodes, two hops.
-- `sysupgrade` in place, settings kept.
+- `sysupgrade` in place, settings kept, including from an `xe5300-nss`
+  image to an `xe5300` image.
+- On `xe5300`: software flow offloading (`flow_offloading '1'`) with one
+  port as WAN, wired and Wi-Fi clients; this needs the firewall4 version
+  on this branch, which lists the bridge member devices in the flowtable.
 - Switching between the OpenWrt slot and the stock slot and back.
 - On `xe5300-nss`: NSS offload with ECM (about 540 Mbit/s routed
   to a Wi-Fi client at near-idle CPU in one home test).
@@ -114,14 +118,19 @@ board data files.
   after a cold boot. It is set in the device tree's `bootargs-append`.
 - **5 GHz sometimes fails its first start after boot.** The radio comes up
   when restarted. ath11k waits 1 s for vdev setup, which appears to be too
-  short for this radio.
+  short for this radio. `xe5300` carries a patch raising it to 5 s, as in
+  ath10k and ath12k; the first boots of three units with it were clean, which
+  is too few to call it fixed.
 - **5 GHz HE80 on U-NII-3 (channel 149 and up) does not start.** HE20, HE40
   and VHT80 do. Channel 36 HE80 works.
-- **Mesh metric warning.** `airtime_link_metric_get()` logs a WARN with a
-  stack trace several times a second on the host mesh path. At the default
+- **Mesh metric warning (`xe5300-nss`).** On the NSS tree the driver
+  reports no transmit rate for mesh peers, so `airtime_link_metric_get()`
+  logs a WARN with a stack trace several times a second. At the default
   console log level this stalls the CPU on the serial console and causes
   latency spikes of hundreds of milliseconds. Workaround:
-  `sysctl -w kernel.printk="1 4 1 7"`.
+  `sysctl -w kernel.printk="1 4 1 7"`. Not seen on `xe5300`, where the
+  transmit rate is reported; that branch still turns the WARN into a
+  one-time warning.
 - **Software flow offloading with the `rtl8365mb-8021q` tagger
   (`xe5300-nss`).** With bridged switch ports in the flowtable, a frame
   from a bridged port keeps `skb->offload_fwd_mark` set; when the flowtable
