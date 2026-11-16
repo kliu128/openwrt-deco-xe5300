@@ -54,6 +54,20 @@ $(Package/ath11k-firmware-default)
   TITLE:=IPQ5018/QCN6122 ath11k firmware
 endef
 
+# Some boards ship board files in the WLAN.HK.2.5 format, which the 2.6 and
+# 2.7 firmware reject while parsing them (phyrf_bdf.c "axis_value ==
+# ANTENNACHAIN_AXIS_Z" assertion). They need this 2.5 build instead.
+define Package/ath11k-firmware-ipq5018-qcn6122-2.5
+$(Package/ath11k-firmware-default)
+  TITLE:=IPQ5018/QCN6122 ath11k firmware (WLAN.HK.2.5.0.1)
+  CONFLICTS:=ath11k-firmware-ipq5018-qcn6122 ath11k-firmware-ipq5018-only
+endef
+
+define Package/ath11k-firmware-ipq5018-only
+$(Package/ath11k-firmware-default)
+  TITLE:=IPQ5018 ath11k firmware without QCN6122 payloads
+endef
+
 define Package/ath11k-firmware-ipq6018
 $(Package/ath11k-firmware-default)
   TITLE:=IPQ6018 ath11k firmware
@@ -95,6 +109,24 @@ define Package/ath11k-firmware-ipq5018-qcn6122/install
 		$(1)/lib/firmware/ath11k/QCN6122/hw1.0/
 endef
 
+define Package/ath11k-firmware-ipq5018-qcn6122-2.5/install
+	$(INSTALL_DIR) $(1)/lib/firmware/ath11k/IPQ5018/hw1.0
+	$(INSTALL_DATA) \
+		$(BUILD_DIR)/$(ATH11K_LEGACY_FW_SUBDIR)/ath11k-firmware/IPQ5018_QCN6122_QCN6122/hw1.0/2.5.0.1/WLAN.HK.2.5.0.1-03982-QCAHKSWPL_SILICONZ-3/*.* \
+		$(1)/lib/firmware/ath11k/IPQ5018/hw1.0/
+	$(INSTALL_DIR) $(1)/lib/firmware/ath11k/QCN6122/hw1.0
+	$(INSTALL_DATA) \
+		$(BUILD_DIR)/$(ATH11K_LEGACY_FW_SUBDIR)/ath11k-firmware/IPQ5018_QCN6122_QCN6122/hw1.0/2.5.0.1/WLAN.HK.2.5.0.1-03982-QCAHKSWPL_SILICONZ-3/qcn6122/*.* \
+		$(1)/lib/firmware/ath11k/QCN6122/hw1.0/
+endef
+
+define Package/ath11k-firmware-ipq5018-only/install
+	$(INSTALL_DIR) $(1)/lib/firmware/ath11k/IPQ5018/hw1.0
+	$(INSTALL_DATA) \
+		$(BUILD_DIR)/$(ATH11K_LEGACY_FW_SUBDIR)/ath11k-firmware/IPQ5018_QCN6122_QCN6122/hw1.0/2.7.0.1/WLAN.HK.2.7.0.1-01744-QCAHKSWPL_SILICONZ-1/*.* \
+		$(1)/lib/firmware/ath11k/IPQ5018/hw1.0/
+endef
+
 define Package/ath11k-firmware-ipq6018/install
 	$(INSTALL_DIR) $(1)/lib/firmware/IPQ6018
 	$(INSTALL_DATA) \
@@ -118,5 +150,7 @@ define Package/ath11k-firmware-ipq9574/install
 endef
 
 $(eval $(call BuildPackage,ath11k-firmware-ipq5018-qcn6122))
+$(eval $(call BuildPackage,ath11k-firmware-ipq5018-qcn6122-2.5))
+$(eval $(call BuildPackage,ath11k-firmware-ipq5018-only))
 $(eval $(call BuildPackage,ath11k-firmware-ipq6018))
 $(eval $(call BuildPackage,ath11k-firmware-ipq9574))
