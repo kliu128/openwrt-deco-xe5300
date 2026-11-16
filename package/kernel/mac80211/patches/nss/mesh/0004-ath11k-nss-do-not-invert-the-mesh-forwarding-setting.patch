@@ -1,0 +1,28 @@
+From: Kevin Liu <11365056+kliu128@users.noreply.github.com>
+Date: Sun, 15 Nov 2026 22:40:00 +0000
+Subject: [PATCH] ath11k: nss: do not invert the mesh forwarding setting
+
+When user space sets dot11MeshForwarding, mac80211 stores the value in
+bss_conf.nss_offld_mesh_forward_enabled and ath11k copies it unchanged into
+the firmware's block_mesh_forwarding field. Enabling forwarding therefore
+tells the NSS firmware to block it: a mesh point configured with
+mesh_fwding=1 peers and carries its own traffic, but relays nothing
+between its peers.
+
+Seen on three IPQ5018 units in a line (TP-Link Deco XE5300, NSS firmware
+12.5): with "option mesh_fwding '1'" on the middle node the two-hop path
+resolved and no frame passed; without the option, or with the middle node
+on the host path, it did.
+
+---
+--- a/drivers/net/wireless/ath/ath11k/nss.c
++++ b/drivers/net/wireless/ath/ath11k/nss.c
+@@ -1957,7 +1957,7 @@ int ath11k_nss_mesh_config_update(struct
+ 
+ 	if (changed & BSS_CHANGED_NSS_MESH_FWD_ENABLED) {
+ 		nss_msg->block_mesh_forwarding =
+-			vif->bss_conf.nss_offld_mesh_forward_enabled;
++			!vif->bss_conf.nss_offld_mesh_forward_enabled;
+ 		nss->mesh_forward_enabled =
+ 			vif->bss_conf.nss_offld_mesh_forward_enabled;
+ 		nss_msg->config_flags |= NSS_WIFI_MESH_CONFIG_FLAG_BLOCK_MESH_FWD_VALID;
