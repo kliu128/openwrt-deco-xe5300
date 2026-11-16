@@ -7,6 +7,7 @@ preinit_mount_factory_data() {
 	. /lib/functions/system.sh
 
 	case $(board_name) in
+	tplink,deco-xe5300|\
 	tplink,eap650-outdoor-v1|\
 	tplink,re700x)
 		mtd_path=$(find_mtd_chardev "factory_data")

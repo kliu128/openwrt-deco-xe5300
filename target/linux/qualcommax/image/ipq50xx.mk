@@ -965,3 +965,28 @@ define Device/zyxel_scr50axe
 		ipq-wifi-zyxel_scr50axe
 endef
 TARGET_DEVICES += zyxel_scr50axe
+
+# Flash-installable profile. The kernel FIT lives in UBI volume "kernel" of
+# the slot the stock bootloader selects through tp_boot_idx; see the DTS and
+# lib/upgrade/platform.sh. gzip FIT and config name as verified on hardware.
+# Board files come from ipq-wifi-tplink_deco-xe5300, calibration and addresses
+# from each unit's own flash (11-ath11k-caldata, 02_network). Wi-Fi firmware is
+# the public WLAN.HK.2.5.0.1 build: the board files are in the 2.5 format and
+# the default 2.7 firmware (and 2.6) crash while parsing them.
+define Device/tplink_deco-xe5300
+  $(call Device/FitImage)
+  DEVICE_VENDOR := TP-Link
+  DEVICE_MODEL := Deco XE5300
+  SOC := ipq5018
+  DEVICE_DTS := ipq5018-deco-xe5300
+  DEVICE_DTS_CONFIG := config@mp03.5-c1
+  BLOCKSIZE := 128k
+  PAGESIZE := 2048
+  NAND_SIZE := 128m
+  KERNEL_IN_UBI := 1
+  IMAGE_SIZE := 43008k
+  DEVICE_PACKAGES := -wpad-basic-mbedtls wpad-mbedtls iw \
+    kmod-dsa-rtl8365mb kmod-ath11k-ahb ath11k-firmware-ipq5018-qcn6122-2.5 \
+    ipq-wifi-tplink_deco-xe5300
+endef
+TARGET_DEVICES += tplink_deco-xe5300
