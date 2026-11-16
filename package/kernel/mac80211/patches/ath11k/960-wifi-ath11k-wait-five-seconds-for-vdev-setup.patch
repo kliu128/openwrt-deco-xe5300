@@ -1,0 +1,21 @@
+From: Kevin Liu <11365056+kliu128@users.noreply.github.com>
+Date: Sun, 15 Nov 2026 19:00:00 -0800
+Subject: [PATCH] wifi: ath11k: wait five seconds for vdev setup
+
+ath10k and ath12k wait 5 s for a vdev start or stop response, ath11k 1 s.
+On the Deco XE5300 the 5 GHz QCN6122 sometimes fails its first start after
+boot with a vdev setup timeout (-110) and works when started again. The
+timeout is the suspected cause; this has not been confirmed on hardware.
+
+---
+--- a/drivers/net/wireless/ath/ath11k/wmi.h
++++ b/drivers/net/wireless/ath/ath11k/wmi.h
+@@ -2692,7 +2692,7 @@
+ 	u32 ssid[8];
+ } __packed;
+ 
+-#define ATH11K_VDEV_SETUP_TIMEOUT_HZ (1 * HZ)
++#define ATH11K_VDEV_SETUP_TIMEOUT_HZ (5 * HZ)
+ 
+ struct wmi_vdev_start_request_cmd {
+ 	u32 tlv_header;
