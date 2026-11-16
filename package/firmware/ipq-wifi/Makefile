@@ -13,6 +13,13 @@ PKG_FLAGS:=nonshared
 
 include $(INCLUDE_DIR)/package.mk
 
+# Board files that are not in the qca-wireless repository yet live in ./files
+# (see the note near the end of this file) and are staged with the rest.
+define Build/Prepare
+	$(call Build/Prepare/Default)
+	$(if $(wildcard ./files/board-*),$(CP) ./files/board-* $(PKG_BUILD_DIR)/)
+endef
+
 define Build/Compile
 endef
 
@@ -101,6 +108,7 @@ ALLWIFIBOARDS:= \
 	tplink_archer-c60-v3 \
 	tplink_deco-m5 \
 	tplink_deco-x80-5g \
+	tplink_deco-xe5300 \
 	tplink_eap225-wall-v2 \
 	tplink_eap610-outdoor \
 	tplink_eap620-hd-v2 \
@@ -316,6 +324,7 @@ $(eval $(call generate-ipq-wifi-package,tplink_archer-c60-v2,TP-Link Archer C60 
 $(eval $(call generate-ipq-wifi-package,tplink_archer-c60-v3,TP-Link Archer C60 V3))
 $(eval $(call generate-ipq-wifi-package,tplink_deco-m5,TP-Link Deco M5))
 $(eval $(call generate-ipq-wifi-package,tplink_deco-x80-5g,TP-Link Deco X80-5G))
+$(eval $(call generate-ipq-wifi-package,tplink_deco-xe5300,TP-Link Deco XE5300))
 $(eval $(call generate-ipq-wifi-package,tplink_eap225-wall-v2,TP-Link EAP225-Wall v2))
 $(eval $(call generate-ipq-wifi-package,tplink_eap610-outdoor,TPLink EAP610-Outdoor))
 $(eval $(call generate-ipq-wifi-package,tplink_eap620-hd-v2,TP-Link EAP620 HD v2))
