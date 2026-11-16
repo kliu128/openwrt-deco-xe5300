@@ -1,0 +1,39 @@
+From: Kevin Liu <11365056+kliu128@users.noreply.github.com>
+Date: Sun, 15 Nov 2026 23:30:00 +0000
+Subject: [PATCH] ath11k: nss: keep the Ethernet header on path-not-found
+ frames
+
+When the NSS firmware has no mesh path (or proxy path) for a frame it was
+asked to encapsulate, it hands the frame back and the driver sends it
+through the host transmit path so that mac80211 can resolve the path.
+The driver calls eth_type_trans() first, which pulls the Ethernet header,
+and then dev_queue_xmit() with skb->data at the network header. mac80211
+takes the first twelve payload bytes as destination and source address.
+
+Every such frame is lost, the real destination never gets its path
+resolved, and the tables fill with addresses made of IP header fields:
+unresolved mesh paths like 60:0a:ee:20:00:3b (IPv6 version, flow label,
+payload length) and proxy entries like 40:00:40:06:xx:xx (IPv4 flags, TTL,
+protocol, checksum). An IPv4 frame becomes a group-addressed frame (0x45
+has the group bit set) and is flooded to every peer.
+
+Seen on TP-Link Deco XE5300 units after a mesh peer restarted: the node
+that stayed up could no longer reach addresses behind the restarted one
+until it was rebooted itself.
+
+Put the header back before transmitting.
+
+---
+--- a/drivers/net/wireless/ath/ath11k/nss.c
++++ b/drivers/net/wireless/ath/ath11k/nss.c
+@@ -2160,6 +2160,10 @@ ath11k_nss_mesh_obj_ext_data_callback(st
+ 					skb->data, skb->len);
+ 			skb->protocol = eth_type_trans(skb, dev);
+ 			skb_reset_network_header(skb);
++			/* eth_type_trans() pulled the Ethernet header; the transmit
++			 * path needs it back, or it reads addresses from the payload.
++			 */
++			skb_push(skb, ETH_HLEN);
+ 			dev_queue_xmit(skb);
+ 		break;
+ 		default:
