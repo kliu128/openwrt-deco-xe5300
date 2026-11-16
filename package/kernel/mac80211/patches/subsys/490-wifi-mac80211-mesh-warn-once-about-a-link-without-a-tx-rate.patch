@@ -1,0 +1,23 @@
+From: Kevin Liu <11365056+kliu128@users.noreply.github.com>
+Date: Sun, 15 Nov 2026 19:00:00 -0800
+Subject: [PATCH] wifi: mac80211: mesh: warn once about a link without a tx rate
+
+airtime_link_metric_get() warns with a stack trace every time a peer has
+neither an expected throughput nor an averaged tx rate. On ath11k mesh
+links of the Deco XE5300 that is every call, four to five traces a second
+per node. On a 115200 baud serial console that stalled the CPU and gave
+150 to 200 ms average ping times over one mesh hop (4 to 6 ms with the
+console quiet). The metric returned is unchanged; say it once.
+
+---
+--- a/net/mac80211/mesh_hwmp.c
++++ b/net/mac80211/mesh_hwmp.c
+@@ -303,7 +303,7 @@
+ 			return MAX_METRIC;
+ 
+ 		rate = ewma_mesh_tx_rate_avg_read(&sta->mesh->tx_rate_avg);
+-		if (WARN_ON(!rate))
++		if (WARN_ON_ONCE(!rate))
+ 			return MAX_METRIC;
+ 
+ 		err = (fail_avg << ARITH_SHIFT) / 100;
