@@ -13,6 +13,7 @@ PKG_CONFIG_DEPENDS += \
 	CONFIG_ATH10K_LEDS \
 	CONFIG_ATH10K_THERMAL \
 	CONFIG_ATH11K_THERMAL \
+	CONFIG_ATH11K_MEM_PROFILE_512M \
 	CONFIG_ATH12K_THERMAL \
 	CONFIG_ATH_USER_REGD
 
@@ -60,6 +61,7 @@ config-$(CONFIG_ATH9K_UBNTHSR) += ATH9K_UBNTHSR
 config-$(CONFIG_ATH10K_LEDS) += ATH10K_LEDS
 config-$(CONFIG_ATH10K_THERMAL) += ATH10K_THERMAL
 config-$(CONFIG_ATH11K_THERMAL) += ATH11K_THERMAL
+config-$(CONFIG_ATH11K_MEM_PROFILE_512M) += ATH11K_MEM_PROFILE_512M
 config-$(CONFIG_ATH12K_THERMAL) += ATH12K_THERMAL
 
 config-$(call config_package,ath9k-htc) += ATH9K_HTC
@@ -333,6 +335,16 @@ define KernelPackage/ath11k/config
                bool "Enable thermal sensors and throttling support"
                depends on PACKAGE_kmod-ath11k
                default y if TARGET_qualcommax
+
+       config ATH11K_MEM_PROFILE_512M
+               bool "Use smaller host data path rings (512 MB devices)"
+               depends on PACKAGE_kmod-ath11k
+               default n
+               help
+                 Shrinks the transmit completion ring and the monitor
+                 rings that ath11k allocates for every radio. Saves tens
+                 of megabytes on devices with several radios and 512 MB
+                 of RAM. Monitor mode capture becomes less reliable.
 
 endef
 

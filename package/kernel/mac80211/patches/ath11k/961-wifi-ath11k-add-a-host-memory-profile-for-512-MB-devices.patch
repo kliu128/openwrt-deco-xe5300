@@ -1,0 +1,77 @@
+From: Kevin Liu <11365056+kliu128@users.noreply.github.com>
+Subject: [PATCH] wifi: ath11k: add a host memory profile for 512 MB devices
+
+ath11k sizes its host data path rings for access points with 1 GB of RAM.
+Every radio fills the monitor buffer ring with 4096 receive buffers at
+start, whether or not monitor mode is ever used. On a tri-band IPQ5018
+device with 512 MB the driver ends up holding more than half of the
+memory Linux can use.
+
+Add CPTCFG_ATH11K_MEM_PROFILE_512M, which uses the ring sizes of the
+vendor's 512 MB profile: transmit completion ring 8192, monitor status
+ring 512, monitor buffer and destination rings 128.
+
+---
+--- a/drivers/net/wireless/ath/ath11k/Kconfig
++++ b/drivers/net/wireless/ath/ath11k/Kconfig
+@@ -69,6 +69,14 @@
+ 	help
+ 	  Enable ath11k thermal sensors and throttling support.
+ 
++config ATH11K_MEM_PROFILE_512M
++	bool "ath11k host memory profile for 512 MB devices"
++	depends on ATH11K
++	help
++	  Use a smaller transmit completion ring and smaller monitor rings.
++	  Each radio preallocates one receive buffer per monitor ring entry,
++	  so this saves tens of megabytes on a device with several radios.
++
+ config ATH11K_CFR
+ 	bool "ath11k channel frequency response support"
+ 	depends on ATH11K_DEBUGFS
+--- a/drivers/net/wireless/ath/ath11k/dp.h
++++ b/drivers/net/wireless/ath/ath11k/dp.h
+@@ -205,7 +205,11 @@
+ #define DP_WBM_RELEASE_RING_SIZE	64
+ #define DP_TCL_DATA_RING_SIZE		512
+ #define DP_TCL_DATA_RING_SIZE_WCN6750	2048
++#ifdef CPTCFG_ATH11K_MEM_PROFILE_512M
++#define DP_TX_COMP_RING_SIZE		8192
++#else
+ #define DP_TX_COMP_RING_SIZE		32768
++#endif
+ #define DP_TX_IDR_SIZE			DP_TX_COMP_RING_SIZE
+ #define DP_TCL_CMD_RING_SIZE		32
+ #define DP_TCL_STATUS_RING_SIZE		32
+@@ -219,9 +223,21 @@
+ #define DP_RXDMA_BUF_RING_SIZE		4096
+ #define DP_RXDMA_REFILL_RING_SIZE	2048
+ #define DP_RXDMA_ERR_DST_RING_SIZE	1024
++#ifdef CPTCFG_ATH11K_MEM_PROFILE_512M
++#define DP_RXDMA_MON_STATUS_RING_SIZE	512
++#else
+ #define DP_RXDMA_MON_STATUS_RING_SIZE	1024
++#endif
++#ifdef CPTCFG_ATH11K_MEM_PROFILE_512M
++#define DP_RXDMA_MONITOR_BUF_RING_SIZE	128
++#else
+ #define DP_RXDMA_MONITOR_BUF_RING_SIZE	4096
++#endif
++#ifdef CPTCFG_ATH11K_MEM_PROFILE_512M
++#define DP_RXDMA_MONITOR_DST_RING_SIZE	128
++#else
+ #define DP_RXDMA_MONITOR_DST_RING_SIZE	2048
++#endif
+ #define DP_RXDMA_MONITOR_DESC_RING_SIZE	4096
+ 
+ #define DP_RX_RELEASE_RING_NUM	3
+--- a/local-symbols
++++ b/local-symbols
+@@ -166,6 +166,7 @@
+ ATH11K_TRACING=
+ ATH11K_SPECTRAL=
+ ATH11K_THERMAL=
++ATH11K_MEM_PROFILE_512M=
+ ATH11K_CFR=
+ ATH12K=
+ ATH12K_AHB=
