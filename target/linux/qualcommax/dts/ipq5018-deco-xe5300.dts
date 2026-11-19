@@ -52,6 +52,17 @@
 		reg = <0x0 0x40000000 0x0 0x20000000>;
 	};
 
+	reserved-memory {
+		/* Keeps the kernel log of a crash across the reboot (pstore). */
+		ramoops@40f00000 {
+			compatible = "ramoops";
+			reg = <0x0 0x40f00000 0x0 0x100000>;
+			record-size = <0x20000>;
+			console-size = <0x40000>;
+			pmsg-size = <0x10000>;
+		};
+	};
+
 	keys {
 		compatible = "gpio-keys";
 		pinctrl-0 = <&button_pins>;
