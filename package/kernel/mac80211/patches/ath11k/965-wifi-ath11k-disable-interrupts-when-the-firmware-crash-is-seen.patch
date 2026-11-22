@@ -9,7 +9,11 @@ service the rings and write ring pointers into the device while the new
 firmware initialises it. On QCN6122 the new firmware instance then takes
 an exception about half a second after it was started, every few crashes.
 
-Disable the interrupts as soon as the crash is seen. Also disable all copy
+Disable the interrupts as soon as the crash is seen: when the remoteproc
+driver announces that the crashed Q6 is about to be shut down, which is
+also the last moment at which the registers of the internal radio can be
+read without an SError, and again when the QMI service goes away. Also
+disable all copy
 engine interrupts of the QCN6122: it has no wake interrupt to keep, and
 leaving one enabled unbalances the enable in ath11k_pcic_start().
 
@@ -17,7 +21,15 @@ Signed-off-by: Kevin Liu <11365056+kliu128@users.noreply.github.com>
 ---
 --- a/drivers/net/wireless/ath/ath11k/ahb.c
 +++ b/drivers/net/wireless/ath/ath11k/ahb.c
-@@ -839,8 +839,8 @@
+@@ -17,6 +17,7 @@
+ #include "hif.h"
+ #include "qmi.h"
+ #include <linux/remoteproc.h>
++#include <linux/remoteproc/qcom_rproc.h>
+ #include "pcic.h"
+ #include <linux/soc/qcom/smem.h>
+ #include <linux/soc/qcom/smem_state.h>
+@@ -839,11 +840,48 @@
  	.map_service_to_pipe = ath11k_pcic_map_service_to_pipe,
  	.power_down = ath11k_ahb_power_down,
  	.power_up = ath11k_ahb_power_up,
@@ -28,6 +40,82 @@ Signed-off-by: Kevin Liu <11365056+kliu128@users.noreply.github.com>
  	.config_static_window = ath11k_ahb_config_static_window_qcn6122,
  };
  
++/*
++ * The Q6 crashed and is about to be shut down. The registers of the
++ * internal radio cannot be read once that has happened (the access ends in
++ * an SError), so the interrupt handlers have to be quiet before it does.
++ */
++static int ath11k_ahb_ssr_notify(struct notifier_block *nb,
++				 unsigned long action, void *data)
++{
++	struct ath11k_ahb *ab_ahb = container_of(nb, struct ath11k_ahb, ssr_nb);
++	struct ath11k_base *ab = container_of((void *)ab_ahb,
++					      struct ath11k_base, drv_priv);
++	struct qcom_ssr_notify_data *ssr = data;
++
++	if (action != QCOM_SSR_BEFORE_SHUTDOWN || !ssr->crashed)
++		return NOTIFY_DONE;
++
++	if (!test_bit(ATH11K_FLAG_REGISTERED, &ab->dev_flags) ||
++	    test_bit(ATH11K_FLAG_UNREGISTERING, &ab->dev_flags))
++		return NOTIFY_DONE;
++
++	set_bit(ATH11K_FLAG_CRASH_FLUSH, &ab->dev_flags);
++	ath11k_core_crash_irq_disable(ab);
++
++	return NOTIFY_OK;
++}
++
++static void ath11k_ahb_ssr_register(struct ath11k_base *ab)
++{
++	struct ath11k_ahb *ab_ahb = ath11k_ahb_priv(ab);
++
++	ab_ahb->ssr_nb.notifier_call = ath11k_ahb_ssr_notify;
++	ab_ahb->ssr_notifier = qcom_register_ssr_notifier("q6wcss",
++							  &ab_ahb->ssr_nb);
++	if (IS_ERR(ab_ahb->ssr_notifier))
++		ab_ahb->ssr_notifier = NULL;
++}
++
+ static int ath11k_core_get_rproc(struct ath11k_base *ab)
+ {
+ 	struct ath11k_ahb *ab_ahb = ath11k_ahb_priv(ab);
+@@ -1282,6 +1320,8 @@
+ 		goto err_ce_free;
+ 	}
+ 
++	ath11k_ahb_ssr_register(ab);
++
+ 	ath11k_qmi_fwreset_from_cold_boot(ab);
+ 
+ 	return 0;
+@@ -1310,8 +1350,15 @@
+ 
+ static void ath11k_ahb_remove_prepare(struct ath11k_base *ab)
+ {
++	struct ath11k_ahb *ab_ahb = ath11k_ahb_priv(ab);
+ 	unsigned long left;
+ 
++	if (ab_ahb->ssr_notifier) {
++		qcom_unregister_ssr_notifier(ab_ahb->ssr_notifier,
++					     &ab_ahb->ssr_nb);
++		ab_ahb->ssr_notifier = NULL;
++	}
++
+ 	if (test_bit(ATH11K_FLAG_RECOVERY, &ab->dev_flags)) {
+ 		left = wait_for_completion_timeout(&ab->driver_recovery,
+ 						   ATH11K_AHB_RECOVERY_TIMEOUT);
+--- a/drivers/net/wireless/ath/ath11k/ahb.h
++++ b/drivers/net/wireless/ath/ath11k/ahb.h
+@@ -37,6 +37,8 @@
+ 		unsigned int smem_bit;
+ 		struct qcom_smem_state *smem_state;
+ 	} smp2p_info;
++	struct notifier_block ssr_nb;
++	void *ssr_notifier;
+ };
+ 
+ static inline struct ath11k_ahb *ath11k_ahb_priv(struct ath11k_base *ab)
 --- a/drivers/net/wireless/ath/ath11k/core.c
 +++ b/drivers/net/wireless/ath/ath11k/core.c
 @@ -2485,12 +2485,11 @@
@@ -43,7 +131,7 @@ Signed-off-by: Kevin Liu <11365056+kliu128@users.noreply.github.com>
 -	}
 +	if (!ab->is_reset)
 +		ath11k_core_crash_irq_disable(ab);
-+	ab->crash_irqs_off = false;
++	clear_bit(ATH11K_FLAG_CRASH_IRQS_OFF, &ab->dev_flags);
  
  	ath11k_dp_pdev_free(ab);
  	ath11k_cfr_deinit(ab);
@@ -59,27 +147,27 @@ Signed-off-by: Kevin Liu <11365056+kliu128@users.noreply.github.com>
 + */
 +void ath11k_core_crash_irq_disable(struct ath11k_base *ab)
 +{
-+	if (ab->crash_irqs_off)
++	if (test_and_set_bit(ATH11K_FLAG_CRASH_IRQS_OFF, &ab->dev_flags))
 +		return;
 +
-+	ab->crash_irqs_off = true;
 +	ath11k_hif_irq_disable(ab);
 +	ath11k_hif_ce_irq_disable(ab);
 +}
++EXPORT_SYMBOL(ath11k_core_crash_irq_disable);
 +
  void ath11k_core_pre_reconfigure_recovery(struct ath11k_base *ab)
  {
  	struct ath11k *ar;
 --- a/drivers/net/wireless/ath/ath11k/core.h
 +++ b/drivers/net/wireless/ath/ath11k/core.h
-@@ -1031,6 +1031,7 @@
- 	atomic_t recovery_count;
- 	atomic_t recovery_start_count;
- 	bool is_reset;
-+	bool crash_irqs_off;
- 	struct completion reset_complete;
- 	struct completion reconfigure_complete;
- 	struct completion recovery_start;
+@@ -283,6 +283,7 @@
+ 	ATH11K_FLAG_HW_CRYPTO_DISABLED,
+ 	ATH11K_FLAG_BTCOEX,
+ 	ATH11K_FLAG_RECOVERY,
++	ATH11K_FLAG_CRASH_IRQS_OFF,
+ 	ATH11K_FLAG_UNREGISTERING,
+ 	ATH11K_FLAG_REGISTERED,
+ 	ATH11K_FLAG_QMI_FAIL,
 @@ -1294,6 +1295,7 @@
  int ath11k_core_suspend(struct ath11k_base *ab);
  int ath11k_core_suspend_late(struct ath11k_base *ab);

@@ -1,0 +1,50 @@
+From: Kevin Liu <11365056+kliu128@users.noreply.github.com>
+Subject: [PATCH] wifi: ath11k: tell user space when a radio was restarted
+
+After a firmware crash mac80211 restores the interfaces, stations and keys
+of a radio, but links that were keyed with the previous firmware instance
+pass no traffic: an 802.11s link stays established while every frame is
+dropped at the other end, until the peering is done again.
+
+Send a "change" uevent (ATH11K_RECOVERED=1) for the device once its radio
+is up again, so that user space can do that.
+
+Signed-off-by: Kevin Liu <11365056+kliu128@users.noreply.github.com>
+---
+--- a/drivers/net/wireless/ath/ath11k/mac.c
++++ b/drivers/net/wireless/ath/ath11k/mac.c
+@@ -9281,6 +9281,7 @@
+ 	struct ath11k_base *ab = ar->ab;
+ 	int recovery_count;
+ 	struct ath11k_vif *arvif;
++	bool recovered = false;
+ 
+ 	if (reconfig_type != IEEE80211_RECONFIG_TYPE_RESTART)
+ 		return;
+@@ -9292,6 +9293,7 @@
+ 			    ar->pdev->pdev_id);
+ 		ar->state = ATH11K_STATE_ON;
+ 		ieee80211_wake_queues(ar->hw);
++		recovered = true;
+ 
+ 		if (ar->ab->hw_params.current_cc_support &&
+ 		    ar->alpha2[0] != 0 && ar->alpha2[1] != 0)
+@@ -9321,6 +9323,18 @@
+ 	}
+ 
+ 	mutex_unlock(&ar->conf_mutex);
++
++	/*
++	 * The interfaces are back, but links that were keyed with the
++	 * previous firmware instance pass no traffic: a mesh link stays
++	 * established and every frame is dropped at the other end. Let user
++	 * space bring them up again.
++	 */
++	if (recovered) {
++		char *envp[] = { "ATH11K_RECOVERED=1", NULL };
++
++		kobject_uevent_env(&ab->dev->kobj, KOBJ_CHANGE, envp);
++	}
+ }
+ 
+ static void

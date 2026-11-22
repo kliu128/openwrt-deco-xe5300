@@ -1,0 +1,32 @@
+#!/bin/sh
+# A radio was restarted after a Wi-Fi firmware crash (uevent from ath11k). Its interfaces, stations and keys are
+# back, but links that were set up with the previous firmware instance pass no traffic: a mesh link stays
+# "established" while the other end drops every frame. Do the mesh peering again and make stations reconnect,
+# on the interfaces of that radio only.
+
+[ "$ATH11K_RECOVERED" = 1 ] || exit 0
+
+peers=0
+stations=0
+for phy in /sys"$DEVPATH"/ieee80211/phy*; do
+	[ -d "$phy" ] || continue
+	for netdev in "$phy"/device/net/*; do
+		[ -d "$netdev/phy80211" ] || continue
+		[ "$(readlink -f "$netdev/phy80211")" = "$(readlink -f "$phy")" ] || continue
+		i=${netdev##*/}
+		case "$(iw dev "$i" info 2>/dev/null | awk '/type/{print $2 $3}')" in
+		meshpoint)
+			for a in $(iw dev "$i" station dump | awk '/^Station/{print $2}'); do
+				wpa_cli -p /var/run/wpa_supplicant -i "$i" mesh_peer_remove "$a" >/dev/null 2>&1 && peers=$((peers + 1))
+			done
+			;;
+		AP)
+			for a in $(iw dev "$i" station dump | awk '/^Station/{print $2}'); do
+				ubus call "hostapd.$i" del_client "{\"addr\":\"$a\",\"reason\":3,\"deauth\":true,\"ban_time\":0}" >/dev/null 2>&1 && stations=$((stations + 1))
+			done
+			;;
+		esac
+	done
+done
+
+logger -t ath11k-recovered "${DEVPATH##*/} restarted: $peers mesh link(s) set up again, $stations station(s) asked to reconnect"

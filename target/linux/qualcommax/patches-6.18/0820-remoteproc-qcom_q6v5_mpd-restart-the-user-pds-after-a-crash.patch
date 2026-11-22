@@ -8,10 +8,7 @@ nothing spawns them again, so the radios stay dead until a reboot.
 
 When the root pd is stopped after a crash, release the user pds as a
 regular stop would have done. Once the root pd runs again, load and spawn
-them again, one after the other as at boot, and tell user space with a
-"change" uevent (Q6_RECOVERED=1) so that it can key its links again: the
-firmware generates the packet numbers of the hardware ciphers and begins
-at zero.
+them again, one after the other as at boot.
 
 The firmware needs a few seconds after a fatal error before a user pd can
 be spawned again; spawned earlier it takes an exception while it
@@ -68,11 +65,10 @@ Signed-off-by: Kevin Liu <11365056+kliu128@users.noreply.github.com>
  struct wcss_data {
  	u32 pasid;
  	bool share_upd_info_to_q6;
-@@ -134,6 +151,14 @@
- 	ret = qcom_q6v5_wait_for_start(&wcss->q6, 5 * HZ);
+@@ -135,6 +152,14 @@
  	if (ret == -ETIMEDOUT)
  		dev_err(wcss->dev, "start timed out\n");
-+
+ 
 +	/*
 +	 * The root pd is back after a crash: spawn the user pds that went
 +	 * down with it, once the core has finished starting the root pd.
@@ -80,13 +76,15 @@ Signed-off-by: Kevin Liu <11365056+kliu128@users.noreply.github.com>
 +	if (!ret && q6_wcss_respawn_pending(wcss))
 +		mod_delayed_work(system_wq, &wcss->respawn_work,
 +				 msecs_to_jiffies(Q6_RESPAWN_DELAY_MS));
- 
++
  	return ret;
  }
-@@ -206,6 +231,14 @@
+ 
+@@ -205,6 +230,14 @@
+ 		dev_err(wcss->dev, "pd not stopped\n");
  		return ret;
  	}
- 
++
 +	/*
 +	 * A fatal error of the Q6 is reported for the root pd only, while the
 +	 * user pds die with it. Release what was set up for them before the
@@ -94,11 +92,10 @@ Signed-off-by: Kevin Liu <11365056+kliu128@users.noreply.github.com>
 +	 */
 +	if (rproc->state == RPROC_CRASHED)
 +		q6_wcss_teardown_upds(rproc);
-+
+ 
  	ret = qcom_scm_pas_shutdown(desc->pasid);
  	if (ret) {
- 		dev_err(wcss->dev, "not able to shutdown\n");
-@@ -522,8 +555,164 @@
+@@ -522,8 +555,152 @@
  			     wcss->desc->pasid, upd->pd_asid, wcss->mem_region,
  			     wcss->mem_phys, wcss->mem_size,
  			     NULL);
@@ -113,8 +110,8 @@ Signed-off-by: Kevin Liu <11365056+kliu128@users.noreply.github.com>
 +			return true;
 +
 +	return false;
-+}
-+
+ }
+ 
 +/**
 + * q6_wcss_teardown_upds() - release the user pds of a crashed root pd
 + * @rproc:	root pd rproc handle
@@ -159,8 +156,8 @@ Signed-off-by: Kevin Liu <11365056+kliu128@users.noreply.github.com>
 +		dev_info(upd->dev, "user pd %d released after root pd crash\n",
 +			 upd->pd_asid);
 +	}
- }
- 
++}
++
 +/**
 + * q6_wcss_respawn_work() - spawn the user pds again after a root pd recovery
 + * @work:	work handle
@@ -246,24 +243,12 @@ Signed-off-by: Kevin Liu <11365056+kliu128@users.noreply.github.com>
 +		 */
 +		msleep(Q6_RESPAWN_GAP_MS);
 +	}
-+
-+	/*
-+	 * Tell user space that the Wi-Fi firmware was started again. The
-+	 * firmware generates the packet numbers of the hardware ciphers and
-+	 * begins at zero again, so mesh peers and stations have to be keyed
-+	 * again or they drop every frame as a replay.
-+	 */
-+	if (gen == READ_ONCE(wcss->crash_gen)) {
-+		char *envp[] = { "Q6_RECOVERED=1", NULL };
-+
-+		kobject_uevent_env(&wcss->dev->kobj, KOBJ_CHANGE, envp);
-+	}
 +}
 +
  static unsigned long q6_wcss_panic(struct rproc *rproc)
  {
  	struct q6_wcss *wcss = rproc->priv;
-@@ -791,6 +980,7 @@
+@@ -791,6 +968,7 @@
  	wcss->dev = &pdev->dev;
  	wcss->desc = of_device_get_match_data(&pdev->dev);
  	wcss->firmware = firmware;
@@ -271,7 +256,7 @@ Signed-off-by: Kevin Liu <11365056+kliu128@users.noreply.github.com>
  
  	ret = q6_alloc_memory_region(wcss);
  	if (ret)
-@@ -845,6 +1035,7 @@
+@@ -845,6 +1023,7 @@
  	struct rproc *rproc = platform_get_drvdata(pdev);
  	struct q6_wcss *wcss = rproc->priv;
  
