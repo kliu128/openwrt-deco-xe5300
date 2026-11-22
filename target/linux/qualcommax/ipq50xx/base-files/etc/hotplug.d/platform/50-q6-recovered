@@ -1,0 +1,27 @@
+#!/bin/sh
+# The Wi-Fi firmware (Q6) crashed and the kernel started it again. The firmware generates the packet numbers of
+# the hardware ciphers and begins at zero again, while the keys stay the same: mesh peers and stations then drop
+# every frame from this unit as a replay. Key the mesh links again and make the stations reconnect.
+
+[ "$Q6_RECOVERED" = 1 ] || exit 0
+
+(
+	# the last radio finishes its own restart a moment after the kernel event
+	sleep 5
+
+	peers=0
+	for m in $(iw dev | awk '/Interface/{i=$2} /type mesh point/{print i}'); do
+		for a in $(iw dev "$m" station dump | awk '/^Station/{print $2}'); do
+			wpa_cli -p /var/run/wpa_supplicant -i "$m" mesh_peer_remove "$a" >/dev/null 2>&1 && peers=$((peers + 1))
+		done
+	done
+
+	stations=0
+	for h in $(ubus list 'hostapd.*' 2>/dev/null); do
+		for a in $(ubus call "$h" get_clients 2>/dev/null | jsonfilter -e '@.clients' 2>/dev/null | grep -o -E '([0-9a-f]{2}:){5}[0-9a-f]{2}'); do
+			ubus call "$h" del_client "{\"addr\":\"$a\",\"reason\":3,\"deauth\":true,\"ban_time\":0}" >/dev/null 2>&1 && stations=$((stations + 1))
+		done
+	done
+
+	logger -t q6-recovered "Wi-Fi firmware restarted: keyed $peers mesh link(s) again, asked $stations station(s) to reconnect"
+) &
