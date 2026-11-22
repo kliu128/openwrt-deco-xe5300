@@ -1,0 +1,28 @@
+From: Kevin Liu <11365056+kliu128@users.noreply.github.com>
+Subject: [PATCH] wifi: ath11k: clear the host memory region of the firmware
+
+On targets with a fixed memory region the HOST_DDR region is mapped and
+handed to the firmware as it is. After a firmware restart it still holds
+the data of the previous firmware instance.
+
+Clear it every time it is assigned.
+
+Signed-off-by: Kevin Liu <11365056+kliu128@users.noreply.github.com>
+---
+--- a/drivers/net/wireless/ath/ath11k/qmi.c
++++ b/drivers/net/wireless/ath/ath11k/qmi.c
+@@ -2067,6 +2067,14 @@
+ 					ab->qmi.target_mem[i].size);
+ 			if (!ab->qmi.target_mem[idx].iaddr)
+ 				return -EIO;
++
++			/*
++			 * The firmware expects this region to be clear. After
++			 * a firmware restart it still holds what the previous
++			 * instance left behind.
++			 */
++			memset_io(ab->qmi.target_mem[idx].iaddr, 0,
++				  ab->qmi.target_mem[i].size);
+ 
+ 			ab->qmi.target_mem[idx].size = ab->qmi.target_mem[i].size;
+ 			host_ddr_sz = ab->qmi.target_mem[i].size;

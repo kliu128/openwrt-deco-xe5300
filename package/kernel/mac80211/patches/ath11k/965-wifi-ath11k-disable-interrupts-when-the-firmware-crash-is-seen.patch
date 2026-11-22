@@ -1,0 +1,104 @@
+From: Kevin Liu <11365056+kliu128@users.noreply.github.com>
+Subject: [PATCH] wifi: ath11k: disable interrupts when the firmware crash is seen
+
+On AHB targets a firmware crash is noticed when the QMI service goes away,
+but the copy engine and data path interrupts stay enabled until
+ath11k_core_reconfigure_on_crash() runs, which is after the next firmware
+instance has reported that it is ready. In between the handlers still
+service the rings and write ring pointers into the device while the new
+firmware initialises it. On QCN6122 the new firmware instance then takes
+an exception about half a second after it was started, every few crashes.
+
+Disable the interrupts as soon as the crash is seen. Also disable all copy
+engine interrupts of the QCN6122: it has no wake interrupt to keep, and
+leaving one enabled unbalances the enable in ath11k_pcic_start().
+
+Signed-off-by: Kevin Liu <11365056+kliu128@users.noreply.github.com>
+---
+--- a/drivers/net/wireless/ath/ath11k/ahb.c
++++ b/drivers/net/wireless/ath/ath11k/ahb.c
+@@ -839,8 +839,8 @@
+ 	.map_service_to_pipe = ath11k_pcic_map_service_to_pipe,
+ 	.power_down = ath11k_ahb_power_down,
+ 	.power_up = ath11k_ahb_power_up,
+-	.ce_irq_enable = ath11k_pci_enable_ce_irqs_except_wake_irq,
+-	.ce_irq_disable = ath11k_pci_disable_ce_irqs_except_wake_irq,
++	.ce_irq_enable = ath11k_pcic_ce_irqs_enable,
++	.ce_irq_disable = ath11k_pcic_ce_irq_disable_sync,
+ 	.config_static_window = ath11k_ahb_config_static_window_qcn6122,
+ };
+ 
+--- a/drivers/net/wireless/ath/ath11k/core.c
++++ b/drivers/net/wireless/ath/ath11k/core.c
+@@ -2485,12 +2485,11 @@
+ 
+ 	/*
+ 	 * ath11k_core_reset() already disabled the interrupts on the reset
+-	 * path; only the firmware crash path reaches here with them live.
++	 * path, and the firmware crash path did so when the crash was seen.
+ 	 */
+-	if (!ab->is_reset) {
+-		ath11k_hif_irq_disable(ab);
+-		ath11k_hif_ce_irq_disable(ab);
+-	}
++	if (!ab->is_reset)
++		ath11k_core_crash_irq_disable(ab);
++	ab->crash_irqs_off = false;
+ 
+ 	ath11k_dp_pdev_free(ab);
+ 	ath11k_cfr_deinit(ab);
+@@ -2572,6 +2571,22 @@
+ 	}
+ }
+ 
++/*
++ * The firmware is gone. Until the driver has set the rings up again for
++ * the next firmware instance, the interrupt handlers must not run: they
++ * write ring pointers into the device while the new firmware initialises
++ * it.
++ */
++void ath11k_core_crash_irq_disable(struct ath11k_base *ab)
++{
++	if (ab->crash_irqs_off)
++		return;
++
++	ab->crash_irqs_off = true;
++	ath11k_hif_irq_disable(ab);
++	ath11k_hif_ce_irq_disable(ab);
++}
++
+ void ath11k_core_pre_reconfigure_recovery(struct ath11k_base *ab)
+ {
+ 	struct ath11k *ar;
+--- a/drivers/net/wireless/ath/ath11k/core.h
++++ b/drivers/net/wireless/ath/ath11k/core.h
+@@ -1031,6 +1031,7 @@
+ 	atomic_t recovery_count;
+ 	atomic_t recovery_start_count;
+ 	bool is_reset;
++	bool crash_irqs_off;
+ 	struct completion reset_complete;
+ 	struct completion reconfigure_complete;
+ 	struct completion recovery_start;
+@@ -1294,6 +1295,7 @@
+ int ath11k_core_suspend(struct ath11k_base *ab);
+ int ath11k_core_suspend_late(struct ath11k_base *ab);
+ void ath11k_core_pre_reconfigure_recovery(struct ath11k_base *ab);
++void ath11k_core_crash_irq_disable(struct ath11k_base *ab);
+ bool ath11k_core_coldboot_cal_support(struct ath11k_base *ab);
+ 
+ const struct firmware *ath11k_core_firmware_request(struct ath11k_base *ab,
+--- a/drivers/net/wireless/ath/ath11k/qmi.c
++++ b/drivers/net/wireless/ath/ath11k/qmi.c
+@@ -3305,8 +3305,10 @@
+ 			set_bit(ATH11K_FLAG_CRASH_FLUSH, &ab->dev_flags);
+ 			set_bit(ATH11K_FLAG_RECOVERY, &ab->dev_flags);
+ 
+-			if (!ab->is_reset)
++			if (!ab->is_reset) {
+ 				ath11k_core_pre_reconfigure_recovery(ab);
++				ath11k_core_crash_irq_disable(ab);
++			}
+ 			break;
+ 		case ATH11K_QMI_EVENT_REQUEST_MEM:
+ 			ret = ath11k_qmi_event_mem_request(qmi);

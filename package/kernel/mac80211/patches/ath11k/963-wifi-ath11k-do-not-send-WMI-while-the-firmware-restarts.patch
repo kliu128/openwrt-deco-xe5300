@@ -1,0 +1,53 @@
+From: Kevin Liu <11365056+kliu128@users.noreply.github.com>
+Subject: [PATCH] wifi: ath11k: do not send WMI while the firmware restarts
+
+After a firmware crash ath11k_core_reconfigure_on_crash() clears the HAL
+rings and then drops ATH11K_FLAG_CRASH_FLUSH before the copy engine pipes
+exist again. A WMI command sent in that window (hostapd reads the channel
+survey every few seconds, which sends WMI_PDEV_BSS_CHAN_INFO_REQUEST)
+reaches ath11k_ce_send() with a cleared ring and dereferences a NULL
+pointer in ath11k_hal_srng_access_begin().
+
+Keep the flag set until ath11k_ce_init_pipes() has run, and do not ask the
+firmware for the channel survey unless the radio is up.
+
+Signed-off-by: Kevin Liu <11365056+kliu128@users.noreply.github.com>
+---
+--- a/drivers/net/wireless/ath/ath11k/core.c
++++ b/drivers/net/wireless/ath/ath11k/core.c
+@@ -2431,6 +2431,12 @@
+ 		ath11k_err(ab, "failed to initialize CE: %d\n", ret);
+ 		goto err_firmware_stop;
+ 	}
++
++	/*
++	 * On the recovery path the copy engine rings were cleared and exist
++	 * again only from here on. Keep rejecting sends until then.
++	 */
++	clear_bit(ATH11K_FLAG_CRASH_FLUSH, &ab->dev_flags);
+ 
+ 	ret = ath11k_dp_alloc(ab);
+ 	if (ret) {
+@@ -2499,8 +2505,6 @@
+ 
+ 	ab->free_vdev_map = (1LL << (ab->num_radios * TARGET_NUM_VDEVS(ab))) - 1;
+ 
+-	clear_bit(ATH11K_FLAG_CRASH_FLUSH, &ab->dev_flags);
+-
+ 	ret = ath11k_core_qmi_firmware_ready(ab);
+ 	if (ret)
+ 		goto err_hal_srng_deinit;
+--- a/drivers/net/wireless/ath/ath11k/mac.c
++++ b/drivers/net/wireless/ath/ath11k/mac.c
+@@ -9336,6 +9336,11 @@
+ 	    ar->rx_channel != channel)
+ 		return;
+ 
++	/* no WMI while the firmware is being restarted */
++	if (ar->state != ATH11K_STATE_ON ||
++	    test_bit(ATH11K_FLAG_RECOVERY, &ar->ab->dev_flags))
++		return;
++
+ 	if (ar->scan.state != ATH11K_SCAN_IDLE) {
+ 		ath11k_dbg(ar->ab, ATH11K_DBG_MAC,
+ 			   "ignoring bss chan info req while scanning..\n");
